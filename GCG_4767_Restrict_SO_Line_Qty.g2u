@@ -1,0 +1,86 @@
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'BN Oct 19
+'This project will block the Qty of the old lines in Order Entry>Open>Lines screen if user is not in the group ORDNTRY. 
+'However, user will be able to add/modify Qty of new lines until they exit the Order Header screen.
+
+'Technical issue but resolved in an accepted way in this project:
+'If user visits an old line which is blocked with Quantity, and wants to return to the new blank line entry, he has to hit Save for the old line then screen will jump to the new blank line entry
+'in order for the Qty of the blank new line to be unlocked (This is why I use the hook 12231 - Post Save). 
+'This is because we do not have a hook for the event of typing the new line number if we jump from old lines. 
+'The hook for the line change event (12705) only fires for existing lines.
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+v.Local..BulkDeclareString(sError, sSQL, sOrder, sRet)
+V.Local..BulkDeclareBoolean(bIsInCHANGESO)
+v.Local..BulkDeclareLong(iNewMaxLine,iOldMaxLine,iCurrentMaxLine, iLine)
+
+F.ODBC.Connection!conx.OpenConnection(V.Ambient.PDSN, V.Ambient.PUser, V.Ambient.PPass)
+
+f.Intrinsic.Control.If(v.Caller.Switches,=,"O")
+	
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		'Select Order hook
+		F.Intrinsic.Control.Case(11565)			
+			
+			f.Intrinsic.String.LPad(v.Passed.000003,"0",7,v.Local.sOrder)
+			f.Intrinsic.String.Build("Select max(Cast(Record_No as Integer)) from V_Order_Lines Where Order_No = '{0}' and Line_Type = 'S'",v.Local.sOrder,v.Local.sSQL)
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.iNewMaxLine)
+			f.Intrinsic.String.Build("Select Max_Line from GCG_4767_SO_Lines where Order_No = '{0}'",v.Local.sOrder,v.Local.sSQL)
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.iOldMaxLine)
+			f.Intrinsic.Control.If(v.Local.iNewMaxLine,>,v.Local.iOldMaxLine)
+				v.Local.iOldMaxLine.Set(v.Local.iNewMaxLine)
+			f.Intrinsic.Control.EndIf
+			
+			f.Intrinsic.String.Build("Select Order_No from GCG_4767_SO_Lines where Order_No = '{0}'",v.Local.sOrder,v.Local.sSQL)
+			f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+			f.Intrinsic.Control.If(v.Local.sRet,=,"")
+				f.Intrinsic.String.Build("Insert into GCG_4767_SO_Lines (Order_No,Max_Line) values ('{0}',{1})",v.Local.sOrder,v.Local.iOldMaxLine,v.Local.sSQL)
+				f.ODBC.Connection!conx.Execute(v.Local.sSQL)
+			f.Intrinsic.Control.Else
+				f.Intrinsic.String.Build("Update GCG_4767_SO_Lines set Max_Line = {0} where Order_No = '{1}'",v.Local.iOldMaxLine,v.Local.sOrder,v.Local.sSQL)
+				f.ODBC.Connection!conx.Execute(v.Local.sSQL)
+			f.Intrinsic.Control.EndIf
+	
+		'Change line hook
+		F.Intrinsic.Control.Case(12705)
+		
+			F.Global.Security.IsInGroup(V.Caller.User,"ORDRNTRY",V.Caller.CompanyCode,V.Local.bIsInCHANGESO)
+			F.Intrinsic.Control.If(V.Local.bIsInCHANGESO,=,False)
+				f.Intrinsic.String.LPad(v.Passed.000060,"0",7,v.Local.sOrder)
+				f.Intrinsic.String.Build("Select Max_Line from GCG_4767_SO_Lines where Order_No = '{0}'",v.Local.sOrder,v.Local.sSQL)
+				f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.iCurrentMaxLine)	
+				v.Local.iLine.Set(v.Passed.000051)
+				f.Intrinsic.Math.Mult(v.Local.iLine,10,v.Local.iLine)
+				f.Intrinsic.Control.If(v.Local.iLine,>,v.Local.iCurrentMaxLine)
+					F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000007,"LOCK",0)
+				f.Intrinsic.Control.Else
+					F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000007,"LOCK",1)
+				f.Intrinsic.Control.EndIf				
+			f.Intrinsic.Control.EndIf		
+			
+		'Post Save hook
+		F.Intrinsic.Control.Case(12231)
+			F.Intrinsic.UI.ChangeCallerProperty(v.Passed.000007,"LOCK",0)	
+		
+	F.Intrinsic.Control.EndSelect
+
+f.Intrinsic.Control.EndIf	
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4767_Restrict_SO_Line_Qty.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Main.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$$}$10/18/2017 8:51:24 AM$}$False
+Program.Sub.Comments.End
